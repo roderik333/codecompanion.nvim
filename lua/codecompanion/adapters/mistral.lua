@@ -1,6 +1,4 @@
-local adapter_utils = require("codecompanion.utils.adapters")
 local openai = require("codecompanion.adapters.openai")
-vim.g.codecompanion_auto_tool_mode = true
 
 local log_file = vim.fn.expand("/tmp/neovim_debug.log")
 
@@ -57,43 +55,58 @@ return {
       return openai.handlers.form_tools(self, tools)
     end,
     form_messages = function(self, messages)
-      local filtered_messages = {}
+      messages = vim
+          .iter(messages)
+          :map(function(m)
+            local model = self.schema.model.default
+            if type(model) == "function" then
+              model = model(self)
+            end
 
-      for _, m in ipairs(messages) do
-        local model = self.schema.model.default
-        if type(model) == "function" then
-          model = model(self)
-        end
+            -- Ensure tool_calls are clean
+            if m.tool_calls then
+              m.tool_calls = vim
+                  .iter(m.tool_calls)
+                  :map(function(tool_call)
+                    return {
+                      id = tool_call.id,
+                      ["function"] = tool_call["function"],
+                      type = tool_call.type,
+                    }
+                  end)
+                  :totable()
+            end
 
-        -- Ensure tool_calls are clean
-        if m.tool_calls then
-          m.tool_calls = vim
-            .iter(m.tool_calls)
-            :map(function(tool_call)
-              return {
-                id = tool_call.id,
-                ["function"] = tool_call["function"],
-                type = tool_call.type,
-              }
-            end)
-            :totable()
-        end
-        --First invocation works perfectly. Only roles present are system and user.
-        --Second and all consecutive invocations fails unless messages from tools and assistant
-        --are removed from the table.
-        --This change is oportunistic and is most likely not the right way to do it.
-        if m.role ~= "assistant" and m.role ~= "tool" then
-          table.insert(filtered_messages, {
-            role = m.role,
-            content = m.content,
-            tool_calls = m.tool_calls,
-            tool_call_id = m.tool_call_id,
-          })
+            return {
+              role = m.role,
+              content = m.content,
+              tool_calls = m.tool_calls,
+              tool_call_id = m.tool_call_id,
+            }
+          end)
+          :totable()
+      log_message("Original messages array: " .. vim.inspect(messages))
+      -- New logic to remove user messages following tool messages
+      local i = 1
+      while i < #messages do
+        if messages[i].role == "tool" and messages[i + 1] and messages[i + 1].role == "user" then
+          table.remove(messages, i + 1)
+        else
+          i = i + 1
         end
       end
-      -- Add debugging logs here
-      log_message("[DEBUG - form_messages] Filtered Messages:\n" .. vim.inspect(filtered_messages))
-      return { messages = filtered_messages }
+      -- if #messages >= 2 then
+      --   local last_index = #messages
+      --   local second_last_index = last_index - 1
+      --
+      --   if messages[second_last_index].role == "tool" and messages[last_index].role == "user" then
+      --     -- Remove the last message if it's a user message
+      --     table.remove(messages, last_index)
+      --   end
+      -- end
+
+      log_message("Modified messages array: " .. vim.inspect(messages))
+      return { messages = messages }
     end,
     chat_output = function(self, data, tools)
       return openai.handlers.chat_output(self, data, tools)
@@ -119,7 +132,8 @@ return {
       order = 1,
       mapping = "parameters",
       type = "enum",
-      desc = "ID of the model to use. See the model endpoint compatibility table for details on which models work with the Chat API.",
+      desc =
+      "ID of the model to use. See the model endpoint compatibility table for details on which models work with the Chat API.",
       default = "mistral-small-latest",
       choices = {
         -- Premier models
@@ -144,7 +158,8 @@ return {
       type = "number",
       optional = true,
       default = 0,
-      desc = "What sampling temperature to use, we recommend between 0.0 and 0.7. Higher values like 0.7 will make the output more random, while lower values like 0.2 will make it more focused and deterministic. We generally recommend altering this or top_p but not both.",
+      desc =
+      "What sampling temperature to use, we recommend between 0.0 and 0.7. Higher values like 0.7 will make the output more random, while lower values like 0.2 will make it more focused and deterministic. We generally recommend altering this or top_p but not both.",
       validate = function(n)
         return n >= 0 and n <= 1.5, "Must be between 0 and 1.5"
       end,
@@ -156,7 +171,8 @@ return {
       type = "number",
       optional = true,
       default = 1,
-      desc = "Nucleus sampling, where the model considers the results of the tokens with top_p probability mass. So 0.1 means only the tokens comprising the top 10% probability mass are considered. We generally recommend altering this or temperature but not both.",
+      desc =
+      "Nucleus sampling, where the model considers the results of the tokens with top_p probability mass. So 0.1 means only the tokens comprising the top 10% probability mass are considered. We generally recommend altering this or temperature but not both.",
       validate = function(n)
         return n >= 0 and n <= 1, "Must be between 0 and 1"
       end,
@@ -168,7 +184,8 @@ return {
       type = "integer",
       optional = true,
       default = nil,
-      desc = "The maximum number of tokens to generate in the completion. The token count of your prompt plus max_tokens cannot exceed the model's context length.",
+      desc =
+      "The maximum number of tokens to generate in the completion. The token count of your prompt plus max_tokens cannot exceed the model's context length.",
       validate = function(n)
         return n > 0, "Must be greater than 0"
       end,
@@ -207,7 +224,8 @@ return {
       type = "number",
       optional = true,
       default = 0,
-      desc = "Determines how much the model penalizes the repetition of words or phrases. A higher presence penalty encourages the model to use a wider variety of words and phrases, making the output more diverse and creative.",
+      desc =
+      "Determines how much the model penalizes the repetition of words or phrases. A higher presence penalty encourages the model to use a wider variety of words and phrases, making the output more diverse and creative.",
       validate = function(n)
         return n >= -2 and n <= 2, "Must be between -2 and 2"
       end,
@@ -219,7 +237,8 @@ return {
       type = "number",
       optional = true,
       default = 0,
-      desc = "Penalizes the repetition of words based on their frequency in the generated text. A higher frequency penalty discourages the model from repeating words that have already appeared frequently in the output, promoting diversity and reducing repetition.",
+      desc =
+      "Penalizes the repetition of words based on their frequency in the generated text. A higher frequency penalty discourages the model from repeating words that have already appeared frequently in the output, promoting diversity and reducing repetition.",
       validate = function(n)
         return n >= -2 and n <= 2, "Must be between -2 and 2"
       end,
